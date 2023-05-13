@@ -1,22 +1,55 @@
 import sys
 sys.path.append('..')
 import srt
-from EPRReaderPY.src.eprRead import *
+from EPRReaderPY.src.epr_reader import *
 # timestamp should multiply 100 times // OK
-import openslide
+# The path can also be read from a config file, etc.
+# OPENSLIDE_PATH = r'D:\openslide-win64-20230414\bin'
+import codecs
+import chardet
 import os
+if hasattr(os, 'add_dll_directory'):
+    # Python >= 3.8 on Windows
+    with os.add_dll_directory(os.getenv('OPENSLIDE_PATH')):
+        import openslide
+else:
+    import openslide
+
+from error import *
 from PIL import Image
 import numpy as np
 import Generate_book.read_srt as read_srt
 import json
-import hdbscan
+# import hdbscan
 
-
+epr_reader = read_epr()
 # epr_file = '../1-4-2/1-4-2_肝细胞坏死__-_40x.epr'
 # srt_file = '../1-4-2/1-4-2_肝细胞坏死__-_40x.srt'
 # slide_file = '../1-4-2/1-4-2_肝细胞坏死__-_40x.ndpi'
 picture_mode = 'fixation'
 # img_folder = f'../1-4-2/1-4-2_肝细胞坏死__-_40x-img-{picture_mode}'
+
+def change_codec(file):
+    # 检测原始文件的编码类型
+    with open(file, 'rb') as f:
+        raw_data = f.read()
+        result = chardet.detect(raw_data)
+        encoding = result['encoding']
+        print(encoding)
+
+    # 如果编码类型为GBK，则进行编码转换
+    if encoding == 'GBK':
+        with codecs.open(file, 'r', encoding='gbk') as f_in:
+            with codecs.open(file, 'w', encoding='utf-8') as f_out:
+                # 逐行读取原始文件内容，并以UTF-8编码写入目标文件
+                for line in f_in:
+                    f_out.write(line)
+
+        print("文件编码转换完成。")
+    else:
+        print("文件编码不是GBK，无需转换。")
+        
+
 class srt_md_unit():
     def __init__(self, index, start, end, content, img_path):
         self.index = index
@@ -25,12 +58,12 @@ class srt_md_unit():
         self.content = content
         self.img_path = img_path
 
-def get_focus_by_HDBSCAN(xy, l):
-    cluster = hdbscan.HDBSCAN(min_cluster_size=10)
+# def get_focus_by_HDBSCAN(xy, l):
+#     cluster = hdbscan.HDBSCAN(min_cluster_size=10)
     
-    cluster_labels = cluster.fit_predict(xy)
+#     cluster_labels = cluster.fit_predict(xy)
     
-    return
+#     return
         
 
 # define a function that can get the image by timestamp
@@ -148,7 +181,7 @@ def get_part_start_end_time(part, srt_content):
 
 def generate_target_picture(level0_windows, part, slide, epr_pointer, img_folder, minlevel):
     img_name = str(part['index_range']) + '.png'
-    img_path = img_folder + '/' + img_name
+    img_path = os.path.join(img_folder, img_name)
     # if x and y < 0, then set x and y = 0
     # arr = np.array(level0_windows)
     # max = np.max(arr, axis = 0)
@@ -183,8 +216,12 @@ def write_part_list_to_file(part_list, json_file):
 
 
 def gen_part_pic(epr_file, srt_file, img_folder, slide_file):
-    epr = EPRread(epr_file)
-    srt_content = srt.parse(open(srt_file))
+    try:
+        epr = epr_reader.read(epr_file)
+    except:
+        raise Epr_Error('epr open failed')
+    change_codec(srt_file)
+    srt_content = srt.parse(open(srt_file, 'r', encoding='utf-8-sig'))
     srt_content = list(srt_content)
     # check img_folder is exist, if not, create it
     if not os.path.exists(img_folder):
@@ -195,10 +232,14 @@ def gen_part_pic(epr_file, srt_file, img_folder, slide_file):
     srt_list = []
     screenPixelWidth = epr.screenPixelWidth
     screenPixelHeight = epr.screenPixelHeight
-    
-    slide = openslide.OpenSlide(slide_file)
+    # p = 'D:\苗原\2022年4月25日_1\1-1-2_肾水样变性_-_40x.ndpi'
+    try:
+        slide = openslide.OpenSlide(slide_file)
+    except:
+        raise Slide_Error('slide open failed')
+
     part_list = read_srt.get_final_text(srt_file)
-    write_part_list_to_file(part_list, img_folder+'/part_list.json')
+    write_part_list_to_file(part_list, os.path.join(img_folder, 'part_list.json'))
     for part in part_list:
         posxy, poslevel = [], []
         level0_windows = []
@@ -221,8 +262,9 @@ def gen_part_pic(epr_file, srt_file, img_folder, slide_file):
             generate_target_picture(level0_windows, part, slide, epr_pointer, img_folder, epr.minlevel)
     
     return part_list, srt_content
+
 def write_content_to_md(img_dir, srt_content, part_list, name, img_folder):
-    md_file = img_dir + '/' + os.path.basename(img_dir) + '.md'
+    md_file = os.path.join(img_dir, (os.path.basename(img_dir) + '.md'))
     with open(md_file, 'a') as f:
         # write file name:
         total_content = ''
@@ -251,7 +293,7 @@ def gen_md_by_dir(rec_dir, img_dir):
         epr_file = ''
         srt_file = ''
         img_folder = img_dir
-        img_folder = img_folder + '/' + root.split('/')[-1]
+        img_folder = os.path.join(img_folder, os.path.basename(os.path.normpath(root)))
         slide_file = ''
         # get files we need
         for file in files:
@@ -271,22 +313,29 @@ def gen_md_by_dir(rec_dir, img_dir):
             while(flag == False):
                 try: 
                     part_list, srt_content = gen_part_pic(epr_file, srt_file, img_folder, slide_file)
-                    flag = True
+                    
                     # gen markdown by result
                     # json_file = img_dir + '/part_list.json'
                     # name = name.split('_')[1]
-                    write_content_to_md(img_dir, srt_content, part_list, name, root.split('/')[-1])
-                except Exception:
-                    print(Exception)
-                    continue
+                    write_content_to_md(img_dir, srt_content, part_list, name, os.path.basename(os.path.normpath(root)))
+                    flag = True
+                except Slide_Error:
+                    print('slide open failed')
+                    break
+                except Epr_Error:
+                    print('epr open failed')
+                    break
+                # except Exception:
+                #     print(str(Exception))
+                #     continue
         
             
             
 
 if __name__ == '__main__':
-    rec_dir = '/home/omnisky/nsd/miaoyuan'
+    rec_dir = r'D:\苗原'
     project_name = 'miaoyuan_lession'
-    img_folder = rec_dir + '/' + project_name
+    img_folder = os.path.join(rec_dir, project_name)
     if not os.path.exists(img_folder):
         os.mkdir(img_folder)
     gen_md_by_dir(rec_dir, img_folder)
