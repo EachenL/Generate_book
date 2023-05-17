@@ -35,7 +35,7 @@ import openai
 class ChatGPT():
     def __init__(self):
         self.messages = []
-        api_key = os.getenv("OPENAI_API_KEY")
+        api_key = os.getenv("NSD_OPENAI_API_KEY")
         org_id = 'org-emV4mY3cz3RsLMUkKTTnGZlE'
         openai.organization = org_id
         openai.api_key = api_key
@@ -52,7 +52,7 @@ class ChatGPT():
             messages=self.messages,
         )
         response_message = completion.choices[0].message
-        # print('chatbot:')
+        # print('chatbot:')he
         # print(completion.choices[0].message.content)
         self.messages.append(response_message)
         self.response_content = completion.choices[0].message.content
@@ -60,3 +60,7 @@ class ChatGPT():
     
     def clear_memory(self):
         self.messages = []
+chatbot = ChatGPT()
+while True:
+    ins = input()
+    print(chatbot.chat(ins))

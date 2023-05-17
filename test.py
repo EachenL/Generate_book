@@ -3,8 +3,10 @@ import sys
 import os
 sys.path.append('..')
 import chardet
-from EPRReaderPY.src.epr_reader.bindings.easy_pathology_record import EasyPathologyRecord
-from EPRReaderPY.src.epr_reader import read_epr
+# from EPRReaderPY.src.epr_reader.bindings.easy_pathology_record import EasyPathologyRecord
+# from EPRReaderPY.src.epr_reader import read_epr
+from epr_reader import read_epr
+# from epr_reader.bindings.easy_pathology_record import EasyPahtologyRecord
 if hasattr(os, 'add_dll_directory'):
     # Python >= 3.8 on Windows
     with os.add_dll_directory(os.getenv('OPENSLIDE_PATH')):
@@ -14,33 +16,33 @@ else:
 openslide.__version__
 openslide.__library_version__
 from readslide import SlideReader
+epr_reader = read_epr()
+
 # import openslide
 if __name__ == "__main__":
-    epr_reader = read_epr()
-    epr_folder = r'D:\miaoyuan_pathology_lesson_slide'
+    epr_folder = r'/home/omnisky/nsd/miaoyuan_all'
     error_epr = []
     error_slide = []
     # 测试epr文件是否能正常读取，以及epr读取服务器是否正常运行
-    # for root, dir, files in os.walk(epr_folder):
-    #     for file in files:
-    #         file_path = os.path.join(root, file)
-    #         if os.path.splitext(file_path)[1] == '.epr':
-    #             try:
-    #                 epr = epr_reader.read(file_path)
-    #             except:
-    #                 error_epr.append(file_path)
-    # epr = epr_reader.read(r'D:\\苗原\\2022年4月25日_3\\1-3-2_肝脂肪变性_-_40x.epr')  
-    # 测试ndpi文件是否能正常读取
     for root, dir, files in os.walk(epr_folder):
         for file in files:
             file_path = os.path.join(root, file)
-            if os.path.splitext(file_path)[1] == '.ndpi': 
+            if os.path.splitext(file_path)[1] == '.epr':
                 try:
-                    # slide = openslide.OpenSlide(file_path)
-                    slide = SlideReader(file_path).slide
-                    
+                    epr = epr_reader.read(file_path)
                 except:
-                    error_slide.append(file_path)
+                    error_epr.append(file_path)
+    # 测试ndpi文件是否能正常读取
+    # for root, dir, files in os.walk(epr_folder):
+    #     for file in files:
+    #         file_path = os.path.join(root, file)
+    #         if os.path.splitext(file_path)[1] == '.ndpi': 
+    #             try:
+    #                 slide = openslide.OpenSlide(file_path)
+    #                 # slide = SlideReader(file_path).slide
+                    
+    #             except:
+    #                 error_slide.append(file_path)
     # 测试文件名编码  
     # for root, dir, files in os.walk(epr_folder):
     #     for file in files:

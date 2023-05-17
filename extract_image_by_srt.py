@@ -8,20 +8,21 @@ from EPRReaderPY.src.epr_reader import *
 import codecs
 import chardet
 import os
+import cv2
 if hasattr(os, 'add_dll_directory'):
     # Python >= 3.8 on Windows
     with os.add_dll_directory(os.getenv('OPENSLIDE_PATH')):
         import openslide
 else:
     import openslide
-
+import traceback
 from error import *
 from PIL import Image
 import numpy as np
 import Generate_book.read_srt as read_srt
 import json
 # import hdbscan
-
+from epr_reader import read_epr
 epr_reader = read_epr()
 # epr_file = '../1-4-2/1-4-2_肝细胞坏死__-_40x.epr'
 # srt_file = '../1-4-2/1-4-2_肝细胞坏死__-_40x.srt'
@@ -64,8 +65,61 @@ class srt_md_unit():
 #     cluster_labels = cluster.fit_predict(xy)
     
 #     return
+def get_roi_imgs(roi_list, slide, minlevel):
+    square_points = []
+    for roi in roi_list:
+        x, y, r, level = roi['x'], roi['y'], roi['radius'], roi['level']
+        square = [x-r, y-r, x+r, y+r, level - minlevel]
+        square_points.append(square)
+    # get biggest level, and normalize list to the maxmium level
+    maxmium_level = max(square_points[:,4])
+    for box in square_points:
+        if box[4] != maxmium_level:
+            difference = box[4]-maxmium_level
+            # we remap the lower level points to highest level
+            box[0:4] = list(map(lambda x: x * (2**difference), box[0:4]))        
+    
+    # 得到图像区域，最小左上角点，以及最大右下角点
+    square_points = np.array(square_points).astype(int)
+    left_up_point = ((min(square_points[:,0])), min(square_points[:,1]))
+    right_down_point = (max(square_points[:,2]), max(square_points[:,3]))
+    width = right_down_point[0] - left_up_point[0]
+    height = right_down_point[1] - left_up_point[1]
+    # 得到关注区域背景图像
+    background_img = slide.read_region(left_up_point, int(maxmium_level), (width, height))
+    # 将roilist转换成已背景图像被标准的坐标
+    for roi in roi_list:
+        # 转换roi坐标
+        roi['level'] = roi['level'] - minlevel
+        roi['x'] = roi['x']* (2 ** (roi['level']-maxmium_level)) - left_up_point[0]
+        roi['y'] = roi['y']* (2 ** (roi['level']-maxmium_level)) - left_up_point[1]
+        roi['radius'] = roi['radius'] * (2 ** (roi['level']-maxmium_level))
         
-
+    # 得到关注区域掩码图像
+    # 在掩码图像中将ROI区域填充为白色
+    mask = np.zeros((width, height), dtype=np.uint8)
+    for roi in roi_list:
+        center_x, center_y, radius = int(roi['x']), int(roi['y']), int(roi['radius'])
+        cv2.circle(mask, (center_x, center_y), radius, 255, -1)
+    
+    # 生成roi区域图像
+    roi_img = cv2.bitwise_and(background_img, background_img, mask=mask)
+    # 生成除了roi区域的图像
+    back_img_without_roi = cv2.bitwise_and(background_img, background_img, mask=~mask)
+    # 降低back_img_without_roi的亮度
+    back_img_without_roi = cv2.addWeighted(back_img_without_roi, 0.5, np.zeros((width, height, 3), dtype=np.uint8), 0.5, 0)
+    # 融合roi_img和back_img_without_roi生成最终图像
+    final_img = cv2.add(roi_img, back_img_without_roi)
+    
+    return background_img, final_img
+        
+def get_roi_list(start, end, epr):
+    roilist = []
+    Roi_List = epr.additionalInfoSet["roiList"]
+    for roi in Roi_List:
+        if roi["beginFrameIndex"] > start and roi["beginFrameIndex"] < end:
+            roilist.append(roi)
+    return roilist
 # define a function that can get the image by timestamp
 def get_window_by_fixation(datum, epr, slide):
     '''
@@ -179,34 +233,15 @@ def get_part_start_end_time(part, srt_content):
     end_time = srt_content[end_index].end.seconds*1000 + srt_content[end_index].end.microseconds/1000
     return start_time, end_time
 
-def generate_target_picture(level0_windows, part, slide, epr_pointer, img_folder, minlevel):
+def generate_target_picture(roi_list, part, slide, img_folder, minlevel):
     img_name = str(part['index_range']) + '.png'
     img_path = os.path.join(img_folder, img_name)
-    # if x and y < 0, then set x and y = 0
-    # arr = np.array(level0_windows)
-    # max = np.max(arr, axis = 0)
-    # max_index = arr.argmax(axis=0)
-    # min = np.min(arr, axis = 0)
-    # min_index = arr.argmin(axis=0)
-    
-    # x, y, w, h, level = min[0], min[1], max[2]-min[0], max[3]-min[1]
-    x, y, w, h, level = find_prop_window(level0_windows, picture_mode, minlevel)
-    # read the image from the slide in level 0
-    # level = arr[max_index[4]][4]
-    # while w > 1920 or h > 1080:
-    #     level += 1
-    #     w, h = w // 2, h // 2
-    # x, y = x // (2**level), y // (2**level)
-    l = 0
-    while w > 4096 or h > 4096:
-        x, y, w, h= x // 2, y // 2, w // 2, h // 2
-        l += 1
-    RGBA_img = slide.read_region((x, y), l, (w, h))
-    print(x, y, w, h, l)
-    # save RGBA_img to img_path, RGBA_img is a PIL.Image.Image object
-    # img = PIL.Image.fromarray(RGBA_img, 'RGBA')
-    RGBA_img.save(img_path, 'PNG')
-    RGBA_img.close()
+    # get roi_list occupy img, and hot img
+    back_img, roi_img = get_roi_imgs(roi_list, slide, minlevel)
+    back_img.save(img_path, 'PNG')
+    roi_img.save(os.path.join(img_folder, "roi_"+img_name), 'PNG')
+    back_img.close()
+    roi_img.close()
     a = 1
     
 def write_part_list_to_file(part_list, json_file):
@@ -214,13 +249,34 @@ def write_part_list_to_file(part_list, json_file):
         json.dump(part_list, outfile)
     return
 
+def gen_partlist_by_srt(img_folder, srt_file):
+    srt_content = srt.parse(open(srt_file, 'r', encoding='utf-8-sig'))
+    srt_content = list(srt_content)
+    # check img_folder is exist, if not, create it
+    if not os.path.exists(img_folder):
+        os.mkdir(img_folder)
+    start_end_list = []
+    while flag == False:
+        try:
+            part_list = read_srt.get_final_text(srt_file)
+            write_part_list_to_file(part_list, os.path.join(img_folder, 'part_list.json'))
+            # get start and end list
+            for part in part_list:
+                start_time, end_time = get_part_start_end_time(part, srt_content)
+                start_end_list.append([start_time, end_time])
+            flag = True
+            print('get start and end list success')
+        except:
+            start_end_list = []
+            print('get start and end list failed, try to regenerate')
+            continue
 
-def gen_part_pic(epr_file, srt_file, img_folder, slide_file):
+def gen_part_pic(epr_file, srt_file, img_folder, slide_file, part_list):
     try:
         epr = epr_reader.read(epr_file)
     except:
         raise Epr_Error('epr open failed')
-    change_codec(srt_file)
+
     srt_content = srt.parse(open(srt_file, 'r', encoding='utf-8-sig'))
     srt_content = list(srt_content)
     # check img_folder is exist, if not, create it
@@ -229,37 +285,24 @@ def gen_part_pic(epr_file, srt_file, img_folder, slide_file):
         
     epr_pointer = 0
 
-    srt_list = []
-    screenPixelWidth = epr.screenPixelWidth
-    screenPixelHeight = epr.screenPixelHeight
-    # p = 'D:\苗原\2022年4月25日_1\1-1-2_肾水样变性_-_40x.ndpi'
     try:
         slide = openslide.OpenSlide(slide_file)
     except:
         raise Slide_Error('slide open failed')
-
-    part_list = read_srt.get_final_text(srt_file)
-    write_part_list_to_file(part_list, os.path.join(img_folder, 'part_list.json'))
+      
+    
     for part in part_list:
-        posxy, poslevel = [], []
-        level0_windows = []
-
-        start_time, end_time = get_part_start_end_time(part, srt_content)
-        
-        while epr_pointer < len(epr.datum)-1 and epr.datum[epr_pointer].millitimestamp <= start_time:
+        roi_list = []
+        start_time = part['start_time']
+        end_time = part['end_time']
+        while epr_pointer < len(epr.rawDataFrames)-1 and epr.rawDataFrames[epr_pointer]['timeStamp'] * 1000 <= start_time:
             epr_pointer += 1
-        
-        while epr_pointer < len(epr.datum)-1 and epr.datum[epr_pointer].millitimestamp <= end_time:
-            # posxy.append([(-epr.datum[epr_pointer].screenX + epr.datum[epr_pointer].eyeX) * (2**(epr.datum[epr_pointer].level-epr.minLevel)), (-epr.datum[epr_pointer].screenY + epr.datum[epr_pointer].eyeY) * (2**(epr.datum[epr_pointer].level-epr.minLevel))])
-            # poslevel.append(epr.datum[epr_pointer].level)
-            # level0_window = get_window_by_screenpath(epr.datum[epr_pointer], epr, slide)
-            level0_window, drop_flag = get_window_by_fixation(epr.datum[epr_pointer], epr, slide)
-            if drop_flag != True:
-                level0_windows.append(level0_window)
+        start_pointer = epr_pointer
+        while epr_pointer < len(epr.rawDataFrames)-1 and epr.rawDataFrames[epr_pointer]['timeStamp'] * 1000 <= end_time:
             epr_pointer += 1
-        if level0_windows != []:
-        # get_focus_by_HDBSCAN(posxy, poslevel)
-            generate_target_picture(level0_windows, part, slide, epr_pointer, img_folder, epr.minlevel)
+        end_pointer = epr_pointer
+        roi_list = get_roi_list(start_pointer, end_pointer, epr)
+        generate_target_picture(roi_list, part, slide, img_folder, epr.minLevel)
     
     return part_list, srt_content
 
@@ -275,20 +318,33 @@ def write_content_to_md(img_dir, srt_content, part_list, name, img_folder):
             # write part of a file
             content += f"##  {part['title']}\n\n"
 
-            start, end = map(int, part['index_range'].split('-'))
-            for i in range(start, end - 1):
-                content += srt_content[i].content + ','
+            # start, end = map(int, part['index_range'].split('-'))
+            # for i in range(start, end - 1):
+            #     content += srt_content[i].content + ','
 
-            content += srt_content[end].content + '。\n'
-            re = read_srt.deal_srt_content(content)
-            content += re + '\n'
+            # content += srt_content[end].content + '。\n'
+            # re = read_srt.deal_srt_content(content)
+            # content += re + '\n'
+            # write re-content
+            content += f"{part['re_content']}\n"
+            # add back pic
             content += f"![{part['index_range']}]({img_folder}/{part['index_range']}.png)\n"
+            # add roi pic
+            content += f"![{part['index_range']}]({img_folder}/roi_{part['index_range']}.png)\n"
             # write part picture
             total_content += content
         f.write(total_content)
-     
-
+def read_partlist_from_json(json_file):
+    with open(json_file) as f:
+        data = json.load(f)
+    return data
+def read_srt_content(srt_file):
+    srt_content = srt.parse(open(srt_file, 'r', encoding='utf-8-sig'))
+    srt_content = list(srt_content)
+    return srt_content
+    
 def gen_md_by_dir(rec_dir, img_dir):
+    # traverse record directory to find epr, slide, srt to generate final file
     for root, dirs, files in os.walk(rec_dir):
         epr_file = ''
         srt_file = ''
@@ -310,13 +366,15 @@ def gen_md_by_dir(rec_dir, img_dir):
         # excute mission
         flag = False
         if epr_file != '' and slide_file != '' and srt_file != '':
+            # file deprecate flag, while the epr, slide, srt is error, than jump to the next file folder
             while(flag == False):
                 try: 
-                    part_list, srt_content = gen_part_pic(epr_file, srt_file, img_folder, slide_file)
+                    # json_file = os.path.join(img_folder, 'part_list.json')
+                    json_file = os.path.join(img_dir, '2022年4月26日_1/part_list.json') # for test
+                    part_list = read_partlist_from_json(json_file)
+                    srt_content = read_srt_content(srt_file)
+                    gen_part_pic(epr_file, srt_file, img_folder, slide_file, part_list)
                     
-                    # gen markdown by result
-                    # json_file = img_dir + '/part_list.json'
-                    # name = name.split('_')[1]
                     write_content_to_md(img_dir, srt_content, part_list, name, os.path.basename(os.path.normpath(root)))
                     flag = True
                 except Slide_Error:
@@ -325,18 +383,22 @@ def gen_md_by_dir(rec_dir, img_dir):
                 except Epr_Error:
                     print('epr open failed')
                     break
-                # except Exception:
-                #     print(str(Exception))
-                #     continue
+                except Exception:
+                    print(traceback.format_exc())
+                    continue
         
             
             
 
 if __name__ == '__main__':
-    rec_dir = r'D:\苗原'
+    # record directory
+    rec_dir = r'/home/omnisky/nsd/miaoyuan_all'
     project_name = 'miaoyuan_lession'
     img_folder = os.path.join(rec_dir, project_name)
+    # create project folder
     if not os.path.exists(img_folder):
         os.mkdir(img_folder)
-    gen_md_by_dir(rec_dir, img_folder)
+    # generate
     
+    read_srt.gen_partlist(rec_dir, img_folder)
+    # gen_md_by_dir(rec_dir, img_folder)
