@@ -60,7 +60,7 @@ class ChatGPT():
     
     def clear_memory(self):
         self.messages = []
-chatbot = ChatGPT()
-while True:
-    ins = input()
-    print(chatbot.chat(ins))
+# chatbot = ChatGPT()
+# while True:
+#     ins = input()
+#     print(chatbot.chat(ins))

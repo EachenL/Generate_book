@@ -3,7 +3,10 @@ import openai
 import use_openai
 import json
 import os
+import traceback
+from success_helper import success_helper
 chatbot = use_openai.ChatGPT()
+suc_helper = success_helper('/home/omnisky/nsd/miaoyuan_all/success_file_record.txt')
 
 def get_part_start_end_time(part, srt_content):
     
@@ -27,11 +30,16 @@ def gen_partlist_by_srt(img_folder, srt_file):
         os.mkdir(img_folder)
     start_end_list = []
     flag = False
-    while flag == False:
+    times = 3
+    while flag == False and times > 0:
         try:
             part_list = get_final_text(srt_file)
             # get start and end list
             for part in part_list:
+                start_time, end_time, start_index, end_index = get_part_start_end_time(part, srt_content)
+            print('part_list check success')    
+            for part in part_list:
+                content = []
                 start_time, end_time, start_index, end_index = get_part_start_end_time(part, srt_content)
                 start_end_list.append([start_time, end_time])
                 part['start_time'] = start_time
@@ -42,12 +50,14 @@ def gen_partlist_by_srt(img_folder, srt_file):
                 part['re_content'] = deal_srt_content(content)
                                 
             write_part_list_to_file(part_list, os.path.join(img_folder, 'part_list.json'))
-
+            suc_helper.add_success_file(srt_file)
             flag = True
             print('get start and end list success')
         except:
             start_end_list = []
-            print('get start and end list failed, try to regenerate')
+            print(traceback.format_exc())
+            print(f'{srt_file} get start and end list failed, try to regenerate')
+            times -= 1
             continue
 
 def gen_partlist(record_folder, partlist_folder):
@@ -57,7 +67,8 @@ def gen_partlist(record_folder, partlist_folder):
             name = file.split('.')[0]
             if ext == 'srt':
                 srt_file = os.path.join(root, file)
-                gen_partlist_by_srt(os.path.join(partlist_folder, name), srt_file)
+                if srt_file not in suc_helper.get_success_list():
+                    gen_partlist_by_srt(os.path.join(partlist_folder, name), srt_file)
     
 
 def deal_srt_content(content):
@@ -95,7 +106,8 @@ def get_final_text(srtfile):
     print(re)
 
     input = '用json的形式重新返回上述内容, 索引范围命名为index_range, index_range中的值用\'-\'隔开, 标题命名为title'
-
+    # chatbot.clear_memory()
+    
     re = chatbot.chat(input)
     try:
         part_list = json.loads(re)
@@ -113,3 +125,15 @@ def get_final_text(srtfile):
 # for _ in range(10):
 #     get_final_text('../1-4-2/1-4-2_肝细胞坏死__-_40x.srt')
 #     chatbot.clear_memory()
+if __name__ == '__main__':
+    # record directory
+    rec_dir = r'/home/omnisky/nsd/miaoyuan_all'
+    project_name = 'miaoyuan_lession'
+    img_folder = os.path.join(rec_dir, project_name)
+    # create project folder
+    if not os.path.exists(img_folder):
+        os.mkdir(img_folder)
+    # generate
+    
+    gen_partlist(rec_dir, img_folder)
+    # gen_md_by_dir(rec_dir, img_folder)
