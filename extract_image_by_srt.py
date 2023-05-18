@@ -72,7 +72,8 @@ def get_roi_imgs(roi_list, slide, minlevel):
         square = [x-r, y-r, x+r, y+r, level - minlevel]
         square_points.append(square)
     # get biggest level, and normalize list to the maxmium level
-    maxmium_level = max(square_points[:,4])
+    # maxmium_level = max(square_points[:,4])
+    maxmium_level = max(point[4] for point in square_points)
     for box in square_points:
         if box[4] != maxmium_level:
             difference = box[4]-maxmium_level
@@ -81,7 +82,7 @@ def get_roi_imgs(roi_list, slide, minlevel):
     
     # 得到图像区域，最小左上角点，以及最大右下角点
     square_points = np.array(square_points).astype(int)
-    left_up_point = ((min(square_points[:,0])), min(square_points[:,1]))
+    left_up_point = (min(square_points[:,0]), min(square_points[:,1]))
     right_down_point = (max(square_points[:,2]), max(square_points[:,3]))
     width = right_down_point[0] - left_up_point[0]
     height = right_down_point[1] - left_up_point[1]
@@ -98,19 +99,23 @@ def get_roi_imgs(roi_list, slide, minlevel):
     # 得到关注区域掩码图像
     # 在掩码图像中将ROI区域填充为白色
     mask = np.zeros((width, height), dtype=np.uint8)
+    mask = np.array(mask, dtype=np.uint8)
     for roi in roi_list:
         center_x, center_y, radius = int(roi['x']), int(roi['y']), int(roi['radius'])
         cv2.circle(mask, (center_x, center_y), radius, 255, -1)
-    
+    background_img = np.array(background_img)
     # 生成roi区域图像
+    if mask.shape[:2] != background_img.shape[:2]:
+        mask = cv2.resize(mask, (background_img.shape[1], background_img.shape[0]))
     roi_img = cv2.bitwise_and(background_img, background_img, mask=mask)
     # 生成除了roi区域的图像
     back_img_without_roi = cv2.bitwise_and(background_img, background_img, mask=~mask)
     # 降低back_img_without_roi的亮度
-    back_img_without_roi = cv2.addWeighted(back_img_without_roi, 0.5, np.zeros((width, height, 3), dtype=np.uint8), 0.5, 0)
+    back_img_without_roi = cv2.addWeighted(back_img_without_roi, 0.5, np.zeros_like((back_img_without_roi), dtype=np.uint8), 0.5, 0)
     # 融合roi_img和back_img_without_roi生成最终图像
     final_img = cv2.add(roi_img, back_img_without_roi)
-    
+    background_img = Image.fromarray(background_img)
+    final_img = Image.fromarray(final_img)
     return background_img, final_img
         
 def get_roi_list(start, end, epr):
@@ -364,13 +369,15 @@ def gen_md_by_dir(rec_dir, img_dir):
             else:
                 continue
         # excute mission
+        json_file = os.path.join(img_dir, name+'/part_list.json')
         flag = False
-        if epr_file != '' and slide_file != '' and srt_file != '':
+        times = 3
+        if epr_file != '' and slide_file != '' and srt_file != '' and os.path.exists(json_file):
             # file deprecate flag, while the epr, slide, srt is error, than jump to the next file folder
-            while(flag == False):
+            while flag == False and times > 0:
                 try: 
                     # json_file = os.path.join(img_folder, 'part_list.json')
-                    json_file = os.path.join(img_dir, '2022年4月26日_1/part_list.json') # for test
+                    # json_file = os.path.join(img_dir, '2022年4月26日_1/part_list.json') # for test
                     part_list = read_partlist_from_json(json_file)
                     srt_content = read_srt_content(srt_file)
                     gen_part_pic(epr_file, srt_file, img_folder, slide_file, part_list)
@@ -378,12 +385,15 @@ def gen_md_by_dir(rec_dir, img_dir):
                     write_content_to_md(img_dir, srt_content, part_list, name, os.path.basename(os.path.normpath(root)))
                     flag = True
                 except Slide_Error:
+                    times -= 1
                     print('slide open failed')
                     break
                 except Epr_Error:
+                    times -= 1
                     print('epr open failed')
                     break
                 except Exception:
+                    times -= 1
                     print(traceback.format_exc())
                     continue
         
@@ -400,5 +410,5 @@ if __name__ == '__main__':
         os.mkdir(img_folder)
     # generate
     
-    read_srt.gen_partlist(rec_dir, img_folder)
-    # gen_md_by_dir(rec_dir, img_folder)
+    # read_srt.gen_partlist(rec_dir, img_folder)
+    gen_md_by_dir(rec_dir, img_folder)
