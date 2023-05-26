@@ -322,27 +322,21 @@ def write_content_to_md(img_dir, srt_content, part_list, name, img_folder):
             content = ''
             # write part of a file
             content += f"##  {part['title']}\n\n"
-
-            # start, end = map(int, part['index_range'].split('-'))
-            # for i in range(start, end - 1):
-            #     content += srt_content[i].content + ','
-
-            # content += srt_content[end].content + '。\n'
-            # re = read_srt.deal_srt_content(content)
-            # content += re + '\n'
             # write re-content
             content += f"{part['re_content']}\n"
-            # add back pic
+            # add background pic
             content += f"![{part['index_range']}]({img_folder}/{part['index_range']}.png)\n"
             # add roi pic
             content += f"![{part['index_range']}]({img_folder}/roi_{part['index_range']}.png)\n"
             # write part picture
             total_content += content
         f.write(total_content)
+        
 def read_partlist_from_json(json_file):
     with open(json_file) as f:
         data = json.load(f)
     return data
+
 def read_srt_content(srt_file):
     srt_content = srt.parse(open(srt_file, 'r', encoding='utf-8-sig'))
     srt_content = list(srt_content)

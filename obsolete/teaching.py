@@ -2,7 +2,7 @@ epr_path = '/home/omnisky/hdd_15T_sdd/nsd/1-4-2/1-4-2_肝细胞坏死__-_40x.epr
 slide_path = '/home/omnisky/hdd_15T_sdd/nsd/1-4-2/1-4-2_肝细胞坏死__-_40x.ndpi'
 import os
 from eprRead import *
-from Generate_book.Sequence_region import *
+from Generate_book.obsolete.Sequence_region import *
 
 
 

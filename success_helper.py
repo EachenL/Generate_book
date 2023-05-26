@@ -1,5 +1,10 @@
 import os
+
 class success_helper:
+    '''
+    save the success parted srt file to success_file_record.txt with chatgpt to avoid repeat process same srt file.
+    his class is a helper class to operate the success_file_record.txt.
+    '''
     def __init__(self, success_file_record):
         self.success_file_record = success_file_record
         if not os.path.exists(self.success_file_record):
