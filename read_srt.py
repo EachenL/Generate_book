@@ -1,11 +1,11 @@
 import srt
 import openai
-import use_openai
+from .use_openai import ChatGPT
 import json
 import os
 import traceback
-from success_helper import success_helper
-chatbot = use_openai.ChatGPT()
+from .success_helper import success_helper
+chatbot = ChatGPT()
 suc_helper = success_helper('/home/omnisky/nsd/miaoyuan_all/success_file_record.txt')
 
 def get_part_start_end_time(part, srt_content):

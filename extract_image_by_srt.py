@@ -1,7 +1,7 @@
 import sys
 sys.path.append('..')
 import srt
-from EPRReaderPY.src.epr_reader import *
+from EPRReaderPY.src.epr_reader import read_epr
 # timestamp should multiply 100 times // OK
 # The path can also be read from a config file, etc.
 # OPENSLIDE_PATH = r'D:\openslide-win64-20230414\bin'
@@ -16,14 +16,14 @@ if hasattr(os, 'add_dll_directory'):
 else:
     import openslide
 import traceback
-from error import *
+from .error import *
 from PIL import Image
 import numpy as np
 import Generate_book.read_srt as read_srt
 import json
 # import hdbscan
-from epr_reader import read_epr
-epr_reader = read_epr()
+# from epr_reader import read_epr # for install mode
+# epr_reader = read_epr() 
 # epr_file = '../1-4-2/1-4-2_肝细胞坏死__-_40x.epr'
 # srt_file = '../1-4-2/1-4-2_肝细胞坏死__-_40x.srt'
 # slide_file = '../1-4-2/1-4-2_肝细胞坏死__-_40x.ndpi'
@@ -278,6 +278,7 @@ def gen_partlist_by_srt(img_folder, srt_file):
 
 def gen_part_pic(epr_file, srt_file, img_folder, slide_file, part_list):
     try:
+        epr_reader = read_epr()
         epr = epr_reader.read(epr_file)
     except:
         raise Epr_Error('epr open failed')
@@ -390,19 +391,26 @@ def gen_md_by_dir(rec_dir, img_dir):
                     times -= 1
                     print(traceback.format_exc())
                     continue
-        
+                
+def gen_book(rec_dir, project_name):
+    rec_dir = rec_dir
+    project_name = project_name
+    img_folder = os.path.join(rec_dir, project_name)
+    if not os.path.exists(img_folder):
+        os.mkdir(img_folder)
+    gen_md_by_dir(rec_dir, img_folder)
             
             
 
-if __name__ == '__main__':
-    # record directory
-    rec_dir = r'/home/omnisky/nsd/miaoyuan_all'
-    project_name = 'miaoyuan_lession'
-    img_folder = os.path.join(rec_dir, project_name)
-    # create project folder
-    if not os.path.exists(img_folder):
-        os.mkdir(img_folder)
-    # generate
+# if __name__ == '__main__':
+#     # record directory
+#     rec_dir = r'/home/omnisky/nsd/miaoyuan_all'
+#     project_name = 'miaoyuan_lession'
+#     img_folder = os.path.join(rec_dir, project_name)
+#     # create project folder
+#     if not os.path.exists(img_folder):
+#         os.mkdir(img_folder)
+#     # generate
     
-    # read_srt.gen_partlist(rec_dir, img_folder)
-    gen_md_by_dir(rec_dir, img_folder)
+#     # read_srt.gen_partlist(rec_dir, img_folder)
+#     gen_md_by_dir(rec_dir, img_folder)
